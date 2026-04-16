@@ -1,7 +1,17 @@
 #include "vkHelper.h"
 #include "FileHelper.h"
 #include <cstring>
+#include <cstdint>
 #include "stdio.h"
+
+// --- Helpers for old SDK headers -------------------------------------------
+#ifndef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME "VK_KHR_portability_enumeration"
+#endif
+#ifndef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME      "VK_KHR_portability_subset"
+#endif
+// ---------------------------------------------------------------------------
 
 constexpr auto g_PipelineCachePath = "pipeline.cache";
 
@@ -55,7 +65,7 @@ VkResult IBLLib::vkHelper::initialize(uint32_t _phyDeviceIndex, uint32_t _descri
 			for (const VkLayerProperties& prop : availableLayers)
 			{
 				if (strcmp(prop.layerName, *it) == 0)
-				{	
+				{
 					printf("Found support for %s layer\n", *it);
 					supported = true;
 					break;
@@ -75,6 +85,22 @@ VkResult IBLLib::vkHelper::initialize(uint32_t _phyDeviceIndex, uint32_t _descri
 		VkInstanceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		createInfo.pApplicationInfo = &appInfo;
+
+		// ---- Opt-in to MoltenVK ----------------------------------------------------
+		createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+
+		static const char* kInstanceExts[] = {
+			VK_KHR_SURFACE_EXTENSION_NAME,
+#ifdef VK_USE_PLATFORM_MACOS_MVK
+			VK_MVK_MACOS_SURFACE_EXTENSION_NAME, // already needed for macOS
+#endif
+			VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME // <--- new
+		};
+
+		createInfo.enabledExtensionCount  =
+			uint32_t(sizeof(kInstanceExts) / sizeof(kInstanceExts[0])); // C++14-safe
+		createInfo.ppEnabledExtensionNames = kInstanceExts;
+		// ---------------------------------------------------------------------------
 
 		if (_debugOutput)
 		{
@@ -129,7 +155,7 @@ VkResult IBLLib::vkHelper::initialize(uint32_t _phyDeviceIndex, uint32_t _descri
 		printf("DriverVersion: %u\n", deviceProperties.driverVersion);
 
 		vkGetPhysicalDeviceFeatures(m_physicalDevice, &m_deviceFeatures); // TODO: check needed features
-		vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &m_memoryProperties);		
+		vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &m_memoryProperties);
 	}
 
 	//
@@ -149,7 +175,7 @@ VkResult IBLLib::vkHelper::initialize(uint32_t _phyDeviceIndex, uint32_t _descri
 		{
 			const VkQueueFamilyProperties& family = queueFamilies[i];
 
-			if (family.queueCount > 0u 
+			if (family.queueCount > 0u
 				&& (family.queueFlags & VK_QUEUE_GRAPHICS_BIT)
 				&& (family.queueFlags & VK_QUEUE_TRANSFER_BIT)
 				)
@@ -178,12 +204,18 @@ VkResult IBLLib::vkHelper::initialize(uint32_t _phyDeviceIndex, uint32_t _descri
 
 		VkPhysicalDeviceFeatures deviceFeatures{}; // TODO: fill required device features
 
+		std::vector<const char*> deviceExts = {
+			//VK_KHR_SWAPCHAIN_EXTENSION_NAME, // For now we don't support swapchain
+			VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+		};
+
 		VkDeviceCreateInfo deviceCreateInfo{};
 		deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
 		deviceCreateInfo.queueCreateInfoCount = 1u;
 		deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
-		deviceCreateInfo.enabledExtensionCount = 0u;
+		deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExts.size());
+		deviceCreateInfo.ppEnabledExtensionNames = deviceExts.data();
 
 		if ((res = vkCreateDevice(m_physicalDevice, &deviceCreateInfo, nullptr, &m_logicalDevice)) != VK_SUCCESS)
 		{
@@ -273,7 +305,7 @@ VkResult IBLLib::vkHelper::initialize(uint32_t _phyDeviceIndex, uint32_t _descri
 		if (readFile(g_PipelineCachePath, cache))
 		{
 			printf("Vulkan pipeline cache loaded\n");
-			
+
 			pipelineCacheCreateInfo.initialDataSize = static_cast<uint32_t>(cache.size());
 			pipelineCacheCreateInfo.pInitialData = cache.data();
 		}
@@ -365,7 +397,7 @@ void IBLLib::vkHelper::shutdown()
 					{
 						printf("Stored %s [%zukb]\n", g_PipelineCachePath, cache.size() / 1000u);
 					}
-				}				
+				}
 			}
 
 			vkDestroyPipelineCache(m_logicalDevice, m_pipelineCache, nullptr);
@@ -486,7 +518,7 @@ VkResult IBLLib::vkHelper::beginCommandBuffer(VkCommandBuffer _cmdBuffer, VkComm
 	{
 		printf("Failed to start recording command buffers [%u]\n", res);
 	}
-	
+
 	return res;
 }
 
@@ -997,7 +1029,7 @@ VkResult IBLLib::vkHelper::readBufferData(VkBuffer _buffer, void* _pData, size_t
 			}
 
 			// read data
-			memcpy(_pData, data, _bytes);			
+			memcpy(_pData, data, _bytes);
 
 			vkUnmapMemory(m_logicalDevice, buf.memory);
 			return res;
@@ -1011,7 +1043,7 @@ VkResult IBLLib::vkHelper::readBufferData(VkBuffer _buffer, void* _pData, size_t
 
 VkResult IBLLib::vkHelper::createImage2DAndAllocate(
 	VkImage& _outImage, uint32_t _width, uint32_t _height,
-	VkFormat _format, VkImageUsageFlags _usage, 
+	VkFormat _format, VkImageUsageFlags _usage,
 	uint32_t _mipLevels, uint32_t _arrayLayers,
 	VkImageTiling _tiling, VkMemoryPropertyFlags _memoryFlags, VkSharingMode _sharingMode, VkImageCreateFlags _flags)
 {
@@ -1155,7 +1187,7 @@ VkResult IBLLib::vkHelper::createImageView(VkImageView& _outView, VkImage _image
 
 			if (res == VK_SUCCESS)
 			{
-				img.views.emplace_back(_outView);			
+				img.views.emplace_back(_outView);
 			}
 			else
 			{
@@ -1209,7 +1241,7 @@ void IBLLib::vkHelper::copyImage2DToBuffer(VkCommandBuffer _cmdBuffer, VkImage _
 
 			region.imageOffset = { 0, 0, 0 };
 			region.imageExtent = img.info.extent;
-		
+
 			vkCmdCopyImageToBuffer(_cmdBuffer, _src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 				_dst,	//	VkBuffer
 				1u,		//	uint32_t  regionCount,
@@ -1231,10 +1263,10 @@ void IBLLib::vkHelper::copyImage2DToBuffer(VkCommandBuffer _cmdBuffer, VkImage _
 		&_region);
 }
 
-void IBLLib::vkHelper::imageBarrier(VkCommandBuffer _cmdBuffer, VkImage _image, 
-									VkImageLayout oldLayout, VkImageLayout newLayout, 
-									VkPipelineStageFlags _srcStage, VkAccessFlags _srcAccess, 
-									VkPipelineStageFlags _dstStage, VkAccessFlags _dstAccess, 
+void IBLLib::vkHelper::imageBarrier(VkCommandBuffer _cmdBuffer, VkImage _image,
+									VkImageLayout oldLayout, VkImageLayout newLayout,
+									VkPipelineStageFlags _srcStage, VkAccessFlags _srcAccess,
+									VkPipelineStageFlags _dstStage, VkAccessFlags _dstAccess,
 									VkImageSubresourceRange _subresourceRange) const
 {
 	for (const Image& img : m_images)
@@ -1324,7 +1356,7 @@ void IBLLib::vkHelper::beginRenderPass(VkCommandBuffer _cmdBuffer, VkRenderPass 
 	info.renderArea = _area;
 	info.clearValueCount = static_cast<uint32_t>(_clearValues.size());
 	info.pClearValues = _clearValues.data();
-	
+
 	vkCmdBeginRenderPass(_cmdBuffer, &info, _contents);
 }
 
@@ -1334,18 +1366,18 @@ void IBLLib::vkHelper::fillSamplerCreateInfo(VkSamplerCreateInfo& _samplerInfo)
 	_samplerInfo.minFilter = VK_FILTER_LINEAR;
 	_samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
 	_samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
-	_samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT; 
-	
+	_samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+
 	_samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 	_samplerInfo.mipLodBias = 0.f;
 	_samplerInfo.minLod = 0.f;
 	_samplerInfo.maxLod = 1.f;
-	
+
 	_samplerInfo.anisotropyEnable = VK_FALSE;
 	_samplerInfo.maxAnisotropy = 0.f;
 	_samplerInfo.compareEnable = VK_FALSE;
 	_samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-	
+
 	_samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
 }
 
@@ -1531,7 +1563,7 @@ IBLLib::GraphicsPipelineDesc::GraphicsPipelineDesc()
 
 	// enable all dynamic states, dont bake these into pipeline
 	static const VkDynamicState dynamicStates[] =
-	{ 
+	{
 	//	VK_DYNAMIC_STATE_VIEWPORT,
 	//	VK_DYNAMIC_STATE_SCISSOR,
 		VK_DYNAMIC_STATE_LINE_WIDTH,
@@ -1676,7 +1708,7 @@ const VkGraphicsPipelineCreateInfo* IBLLib::GraphicsPipelineDesc::getInfo()
 	m_viewportState.scissorCount = 1;
 	m_viewportState.pScissors = &m_viewportScissor;
 
-	//ToDo: coupled attachmentCount 
+	//ToDo: coupled attachmentCount
 
 	m_colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 	m_colorBlendState.logicOpEnable = VK_FALSE;
@@ -1704,7 +1736,7 @@ const VkGraphicsPipelineCreateInfo* IBLLib::GraphicsPipelineDesc::getInfo()
 	// vertex stage
 	m_vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(m_vertexAttributes.size());
 	m_vertexInput.pVertexAttributeDescriptions = m_vertexAttributes.data();
-	
+
 	m_vertexInput.vertexBindingDescriptionCount = static_cast<uint32_t>(m_vertexBindings.size());
 	m_vertexInput.pVertexBindingDescriptions = m_vertexBindings.data();
 
