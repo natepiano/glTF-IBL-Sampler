@@ -1,7 +1,20 @@
 #include "vkHelper.h"
 #include "FileHelper.h"
 #include <cstring>
+#include <cstdint>
 #include "stdio.h"
+
+// --- Portability extension names, for old SDK headers ----------------------
+// The vendored thirdparty/Vulkan-Headers define both of these, so these blocks
+// do not fire for the normal build. They are here for a macOS build whose
+// include path is dominated by an older LunarG SDK.
+#ifndef VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME "VK_KHR_portability_enumeration"
+#endif
+#ifndef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME      "VK_KHR_portability_subset"
+#endif
+// ---------------------------------------------------------------------------
 
 constexpr auto g_PipelineCachePath = "pipeline.cache";
 
@@ -75,6 +88,28 @@ VkResult IBLLib::vkHelper::initialize(uint32_t _phyDeviceIndex, uint32_t _descri
 		VkInstanceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		createInfo.pApplicationInfo = &appInfo;
+
+		// ---- Opt-in to MoltenVK, on Apple only -------------------------------------
+		// MoltenVK is a portability driver, and the loader hides those from
+		// enumeration unless an instance asks for them. A native driver needs none
+		// of it: on Linux this block is not merely redundant, its device-side half
+		// below is fatal, so both halves are guarded rather than left to chance.
+#ifdef __APPLE__
+		createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+
+		static const char* kInstanceExts[] = {
+			VK_KHR_SURFACE_EXTENSION_NAME,
+#ifdef VK_USE_PLATFORM_MACOS_MVK
+			VK_MVK_MACOS_SURFACE_EXTENSION_NAME, // already needed for macOS
+#endif
+			VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+		};
+
+		createInfo.enabledExtensionCount  =
+			uint32_t(sizeof(kInstanceExts) / sizeof(kInstanceExts[0])); // C++14-safe
+		createInfo.ppEnabledExtensionNames = kInstanceExts;
+#endif
+		// ---------------------------------------------------------------------------
 
 		if (_debugOutput)
 		{
@@ -178,12 +213,23 @@ VkResult IBLLib::vkHelper::initialize(uint32_t _phyDeviceIndex, uint32_t _descri
 
 		VkPhysicalDeviceFeatures deviceFeatures{}; // TODO: fill required device features
 
+		std::vector<const char*> deviceExts = {
+			//VK_KHR_SWAPCHAIN_EXTENSION_NAME, // For now we don't support swapchain
+#ifdef __APPLE__
+			// Mandatory when the physical device is a portability implementation,
+			// and absent from every native ICD -- enabling it on one is
+			// VK_ERROR_EXTENSION_NOT_PRESENT (-7) out of vkCreateDevice.
+			VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+#endif
+		};
+
 		VkDeviceCreateInfo deviceCreateInfo{};
 		deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
 		deviceCreateInfo.queueCreateInfoCount = 1u;
 		deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
-		deviceCreateInfo.enabledExtensionCount = 0u;
+		deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExts.size());
+		deviceCreateInfo.ppEnabledExtensionNames = deviceExts.data();
 
 		if ((res = vkCreateDevice(m_physicalDevice, &deviceCreateInfo, nullptr, &m_logicalDevice)) != VK_SUCCESS)
 		{
