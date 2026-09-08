@@ -820,6 +820,20 @@ Result panoramaToCubemap(vkHelper& _vulkan, const VkCommandBuffer _commandBuffer
 
 IBLLib::Result IBLLib::sample(const char* _inputPath, const char* _outputPathCubeMap, const char* _outputPathLUT, Distribution _distribution, unsigned int _cubemapResolution, unsigned int _mipmapCount, unsigned int _sampleCount, OutputFormat _targetFormat, float _lodBias, bool _debugOutput)
 {
+	// A BRDF LUT only exists for a filtered distribution: the image below is
+	// created solely when _distribution != None, but the download near the end of
+	// this function decides by the path alone. Asking for a LUT from an unfiltered
+	// bake therefore downloads VK_NULL_HANDLE and fails the whole call *after* the
+	// cube map has already been written to disk, complete and full-size -- a
+	// failure that survives every check short of reading the file back.
+	//
+	// Reject the combination here, before any Vulkan work, so nothing is written.
+	if (_outputPathLUT != nullptr && _distribution == Distribution::None)
+	{
+		printf("No BRDF LUT is produced for an unfiltered (None) distribution; omit the LUT output path \n");
+		return Result::InvalidArgument;
+	}
+
 	const VkFormat cubeMapFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
 	const VkFormat LUTFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
